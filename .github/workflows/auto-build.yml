@@ -79,21 +79,17 @@ jobs:
           sed -i "1i# Built with PocketBase v$VERSION" compose.yaml
           
       - name: Create Release
-        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v${{ needs.check-and-build.outputs.version }}
-          release_name: PocketBase Docker v${{ needs.check-and-build.outputs.version }}
-          body: |
-            Automatic build for PocketBase v${{ needs.check-and-build.outputs.version }}
+        run: |
+          gh release create "v${{ needs.check-and-build.outputs.version }}" \
+            --title "PocketBase Docker v${{ needs.check-and-build.outputs.version }}" \
+            --notes "Automatic build for PocketBase v${{ needs.check-and-build.outputs.version }}
             
             Docker images published:
-            - `jasonc/pocketbase:${{ needs.check-and-build.outputs.version }}`
-            - `jasonc/pocketbase:latest`
+            - \`jasonc/pocketbase:${{ needs.check-and-build.outputs.version }}\`
+            - \`jasonc/pocketbase:latest\`
             
             This release includes:
             - Updated PocketBase binary to v${{ needs.check-and-build.outputs.version }}
-            - Multi-architecture support (amd64, arm64)
-          draft: false
-          prerelease: false
+            - Multi-architecture support (amd64, arm64)"
