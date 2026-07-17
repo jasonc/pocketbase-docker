@@ -19,26 +19,55 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         
       - name: Check for new PocketBase release
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           # Get latest PocketBase release version
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/pocketbase/pocketbase/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          LATEST_VERSION="$(
+            gh api repos/pocketbase/pocketbase/releases/latest \
+              --jq '.tag_name // empty | sub("^v"; "")'
+          )"
+
+          if [[ ! "$LATEST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid PocketBase release version: '$LATEST_VERSION'" >&2
+            exit 1
+          fi
+
           echo "Latest PocketBase version: $LATEST_VERSION"
-          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
           
           # Check if we already have an image with this tag
-          DOCKER_HUB_TAG=$(curl -s "https://registry.hub.docker.com/v2/repositories/jasonc/pocketbase/tags/$LATEST_VERSION" | jq -r '.name // empty')
-          
-          if [ "$DOCKER_HUB_TAG" = "$LATEST_VERSION" ]; then
-            echo "Image with tag $LATEST_VERSION already exists, skipping build"
-            echo "should-build=false" >> $GITHUB_OUTPUT
-          else
-            echo "New version $LATEST_VERSION detected, will build"
-            echo "should-build=true" >> $GITHUB_OUTPUT
-          fi
+          TAG_URL="https://registry.hub.docker.com/v2/repositories/jasonc/pocketbase/tags/$LATEST_VERSION"
+          HTTP_STATUS="$(
+            curl --silent --show-error \
+              --output /tmp/docker-hub-tag.json \
+              --write-out '%{http_code}' \
+              "$TAG_URL"
+          )"
+
+          case "$HTTP_STATUS" in
+            200)
+              jq --exit-status --arg version "$LATEST_VERSION" \
+                '.name == $version' /tmp/docker-hub-tag.json > /dev/null
+              echo "Image with tag $LATEST_VERSION already exists, skipping build"
+              echo "should-build=false" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "New version $LATEST_VERSION detected, will build"
+              echo "should-build=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Docker Hub tag lookup failed with HTTP $HTTP_STATUS" >&2
+              cat /tmp/docker-hub-tag.json >&2
+              exit 1
+              ;;
+          esac
 
   build-and-push:
     needs: check-and-build
@@ -47,25 +76,25 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Register QEMU so Buildx can emulate arm64 on the x86 GitHub runner
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64,amd64
         
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
